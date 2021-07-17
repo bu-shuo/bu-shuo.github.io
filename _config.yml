@@ -2,14 +2,13 @@ title: Bushuo's Blog
 description: "The Road to Grow Up."
 author:
   name: "Bushuo"
-  email: "someone@somewebsite.somedomain"
   url: "https://bu-shuo.github.io/"
 
 baseurl: /
 
 source: .
 destination: ./_site
-permalink: /:title
+permalink: /:categories/:title
 paginate: 3
 paginate_path: /page/:num/
 
@@ -26,6 +25,8 @@ plugins:
   - jekyll-seo-tag
   - jekyll-paginate
   - jekyll-sitemap
+
+baidu_tmid: 2bffa2fff90ca470b298b0819a690435
 
 # Custom variables
 owner : "Bushuo"
