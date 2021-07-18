@@ -6,15 +6,13 @@
     {% capture currentyear %}{{ 'now' | date: "%Y" }}{% endcapture %}
     <span>© {{ currentyear }}</span>
   </a>
-  {% raw %}
   <script>
 	var _hmt = _hmt || [];
 	(function() {
 		var hm = document.createElement("script");
-		hm.src = "https://hm.baidu.com/hm.js?{{site.baidu_tmid}}";
+		hm.src = "https://hm.baidu.com/hm.js?{{ site.baidu_tmid }}";
 		var s = document.getElementsByTagName("script")[0];
 		s.parentNode.insertBefore(hm, s);
 	})();
   </script>
-  {% endraw %}
 </footer>
