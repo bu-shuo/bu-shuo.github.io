@@ -1,0 +1,138 @@
+I"W'<p><br /></p>
+
+<h1 id="0x00-介绍">0x00 介绍</h1>
+<hr />
+
+<p>PowerShell 是一种具有面向对象的动态类型脚本语言，因为它预先安装在大多数 Windows 计算机上，可以直接访问特权系统功能，还可以直接从内存执行，所以 PowerShell 也在越来越多的网络攻击中使用。其中如何实现对脚本语言去混淆仍是一个未解决的研究问题，下图展示了目前具有代表性的脚本去混淆方法，以及在混淆检测精度、恢复质量和开销方面的比较。</p>
+
+<p><img src="https://bu-shuo.github.io/image/2021-08-01-01.png" alt="具有代表性的去混淆方法比较" /></p>
+
+<p>虽然本文的目标是 PowerShell，但去混淆方法也适用于如 JavaScript 等其他脚本。对于一个被混淆的脚本，在执行前会先将混淆的脚本片段恢复到原始脚本片段，所以本文的一个重点也就是如何精确地识别这些可恢复的脚本片段。在解决了混淆问题后，便可以设计基于语义的 PowerShell 攻击检测系统。</p>
+
+<h1 id="0x01-贡献">0x01 贡献</h1>
+<hr />
+
+<ol>
+  <li>为 PowerShell 脚本设计了第一种有效且轻量级的基于子树的去混淆方法，该方法在 PowerShell 脚本抽象语法树（AST）的子树上执行混淆检测和基于仿真的恢复。</li>
+  <li>基于新的去混淆方法，设计了第一个语义感知的 PowerShell 攻击检测系统，该系统采用面向关联（OOA）挖掘算法获取 PowerShell 攻击特征。</li>
+  <li>通过去混淆方法可以将混淆脚本与原始脚本的相似度从 0.5% 提高到 80% 左右，在使用去混淆方法后，语义感知攻击检测系统的平均准确率为 92.3% ，误报率为 0% ，同等情况下要优于 Windows Defender 和 Virus Total。</li>
+</ol>
+
+<h1 id="0x02-背景">0x02 背景</h1>
+<hr />
+
+<h3 id="1-通过-powershell-发起的-lotl-攻击和无文件攻击">1. 通过 PowerShell 发起的 LotL 攻击和无文件攻击</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>- **LotL 攻击:** 指在攻击过程中尽可能减少文件的产生，只使用纯净的系统工具来躲避检测。
+- **无文件攻击：** 指避免在磁盘上留下任何痕迹的攻击。
+</code></pre></div></div>
+
+<p>使用 PowerShell 发起攻击的原因：
+	1. 从 Windows 7 和 Windows Server 2008 R2 开始，所有 Windows 电脑都预装了 PowerShell。
+	2. 作为一个强大的第三方管理工具，PowerShell 提供了对所有主要 Windows 组件的访问。
+	3. PowerShell 脚本可以直接从内存中执行，不需要任何形式的隔离，因此可以避免在磁盘上留下恶意文件，并绕过传统的基于文件的防御方法。</p>
+<h3 id="2-powershell-的混淆技术">2. PowerShell 的混淆技术</h3>
+
+<p>目前的学术文献中，LotL 恶意软件及其别名很少被提及，这主要局限于介绍性分析或被描述为一种新的恶意软件变体。Li 等人对恶意 Powershell 脚本进行了分析，其中有一个小节专门介绍了 LotL 攻击。Wang 等人最近发表的一篇关于数据来源分析的论文将 living-off-land 识别为一种新兴的绕过检测的恶意软件。Pendergrass 等人认为 LotL 是一种经常不被检测到的恶意软件子类型。<br />
+Cohen 将 LotL 描述为最近在威胁行动中精英们使用的战术，并且成为了一种趋势。Hassan 等人的研究表明，APT 恶意软件使用 LotL 攻击策略来进行持续活动。<br />
+在检测和防御 LotL 攻击方面，Ugarte 等人通过识别可疑行为的模式对 Powershell.exe 调用的恶意脚本进行检测。Rubin 等人将机器学习应用于 Powershell 恶意脚本的检测。Curtsinger 等人提出了针对恶意 Javascript 的检测机制。</p>
+
+<h1 id="0x03-杀毒软件-vs-lotl-技术">0x03 杀毒软件 V.S. LotL 技术</h1>
+<hr />
+
+<p>作者首先选择了 10 个具有代表性的终端杀毒（AV）软件，并利用 LotL 技术执行反向 shell 来模拟发起攻击。这里需要再次强调作者的目的不是为了测试任何特定的 AV 产品检测能力，而是确定不同的 AV 产品之间是否存在普遍的检测差距。<br />
+作者在联网的 Windows10 虚拟机上进行实验，使本地 AV 产品保持更新并连接到云服务。通过不同的 LotL 二进制文件运行一个拥有远控能力的反向 shell 来进行实验，结果是 60 种情况下只有 4 种被检测到。作者也积极联系了这些 AV 厂商进行反馈，并在 90 天后重新使用 60 个完全相同的有效载荷，结果只有25个能被检测到（如下图）。</p>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-02.png" alt="AV 检测结果对比" /></p>
+
+<p>作者在修改有效载荷和参数不变的情况下，又进行了一次实验，结果在之前被检测到的 25 种情况下又有 19 个可以成功建立反向 shell 。这表明 LotL 技术对于 AV 产品仍是一个重大的挑战，安全公司很难在没有误报的情况下部署有效的检测策略。</p>
+
+<h1 id="0x04-lotl-技术的流行程度">0x04 LotL 技术的流行程度</h1>
+<hr />
+
+<h3 id="1-数据集">1. 数据集</h3>
+<p>作者从 VirusTotal 获取行为报告中获取哈希值，并通过 VirusShare、VX-Unground、MalShare 等网站收集样本。为了平衡恶意软件家族与变体，作者使用了 AVClass 项目中的预处理代码，使标签规范化，再使用基于最小哈希的算法来评测 AV 标签的相似性。同时作者从各威胁情报公司或网上收集 APT 报告，并且在 VT 部署了三个 Yara 规则用于实时搜集 VT 上额外的数据集。最终一共收集到 31,805,549 个样本和 16,048,202 个行为报告。</p>
+
+<h3 id="2-lotl-技术的识别">2. LotL 技术的识别</h3>
+<p>过使用模式匹配来识别来处理所有收集到的行为报告，从而识别恶意软件执行过程中对 LotL 二进制文件的调用。为此作者分析了包括 Shell 命令以及样本的执行过程，在执行过程中识别两种二进制程序： 默认的系统二进制程序 和 已签名的二进制程序。再通过模式匹配细化，迭代地验证每个结果集，识别错误分类并将结果从数据库中剔除，最终保留包含 LotL 技术的样本。</p>
+
+<h3 id="3-通过参数分析确定执行目的">3. 通过参数分析确定执行目的</h3>
+<p>作者通过恶意软件样本提供的参数来确定 LotL 技术执行的目的，下图说明了从命令行到之形目的映射：</p>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-03.png" alt="命令行到目的的映射" /></p>
+
+<p>在将单个命令映射到执行目的后，作者对所有的二进制文件匹配了特定的执行目的，最终将执行目的分为九个类别：</p>
+
+<ol>
+  <li>关于执行的类别
+    <ul>
+      <li>代理执行（Proxied Execution）</li>
+      <li>持久化（Persistence）</li>
+      <li>延迟执行（Delayed Execution）</li>
+    </ul>
+  </li>
+  <li>关于修改底层系统组件的类别
+    <ul>
+      <li>防火墙的修改（Firewall Modification）</li>
+      <li>注册表的修改（Registry Modification）</li>
+      <li>权限修改（Permission Modification）</li>
+    </ul>
+  </li>
+  <li>无关执行与系统修改的
+    <ul>
+      <li>打开文件（File Open）</li>
+      <li>侦察（Reconnaissance）</li>
+      <li>终止任务（Task Stopping）</li>
+    </ul>
+  </li>
+</ol>
+
+<h1 id="0x05-评估结果">0x05 评估结果</h1>
+<hr />
+
+<ol>
+  <li>LotL 技术在商业恶意软件中的流行程度</li>
+</ol>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-04.png" alt="LotL 技术在商业恶意软件中的流行程度" /></p>
+
+<ol>
+  <li>LotL 技术使用的参数及执行目的</li>
+</ol>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-05.png" alt="LotL 技术使用的参数及执行目的" /></p>
+
+<ol>
+  <li>使用 LotL 技术的恶意软件家族分布</li>
+</ol>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-06.png" alt="使用 LotL 技术的恶意软件家族分布" /></p>
+
+<ol>
+  <li>良性软件与恶意软件使用 LotL 技术目的比较</li>
+</ol>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-07.png" alt="良性软件与恶意软件使用 LotL 技术目的比较" /></p>
+
+<ol>
+  <li>样本中使用 LotL 二进制文件超过 50% 的 APT 攻击</li>
+</ol>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-08.png" alt="样本中使用 LotL 二进制文件超过 50% 的 APT 攻击" /></p>
+<h1 id="0x06-案例研究">0x06 案例研究</h1>
+<hr />
+
+<p>作者对 Gandcrab 和 Cerber 两个勒索软件家族的样本进行分析，还对 Turla 和 GreyEnergy 两个 APT 组织的样本也进行了分析。如下图展示了 Turla 组织在其近期的恶意软件活动中采用的 LotL 技术，包括恶意行为者如何演变来隐藏他们的行动。</p>
+
+<p><img src="https://bu-shuo.github.io/image/2021-07-25-09.png" alt="Turla 组织采用的 LotL 技术" /></p>
+
+<h1 id="0x07-总结">0x07 总结</h1>
+<hr />
+
+<p>作者通过检测了几个不同的恶意软件数据集，并进行了一个 AV 评估实验，确认了几种提出的 LotL 技术的低检测率，同时研究良性样本与恶意样本在执行目的上的差异时，为检测算法的发展提供了一个方向。实验结果也说明了 LotL 技术在目前的恶意软件中应用广泛，从检测角度来看， LotL 技术也对于安全行业存在巨大的挑战。</p>
+
+<h1 id="0x08-理解">0x08 理解</h1>
+<hr />
+
+<p>这篇论文通过对真实样本的评估，第一次系统地介绍和阐述了 LotL 技术在恶意软件中的应用情况和检测结果，实验结果也说明了目前主流的杀毒软件并不能很好地应对 LotL 攻击，因为在更换一次有效载荷之后检测结果降低了 4/5，这也说明对于 LotL 的检测有可能还是基于匹配的检测，所以作者在最后的展望中也提到了，未来工作包括了对 LotL 的检测。</p>
+:ET
