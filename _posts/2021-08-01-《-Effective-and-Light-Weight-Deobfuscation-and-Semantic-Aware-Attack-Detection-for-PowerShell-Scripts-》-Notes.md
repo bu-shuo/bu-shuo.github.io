@@ -46,11 +46,11 @@ PowerShell 是一种具有面向对象的动态类型脚本语言，因为它预
 
 作者选择了五种具有代表性的混淆方案，并结合不同构造层次的模糊技术和不同的编码方法，前四种混淆方案如下图所示，而对于方案 S5 ，作者采用了基于 AST 的混淆。
 
-![混淆方案](https://bushuo.github.io/image/2021-08-01-02.png)
+![混淆方案](https://bu-shuo.github.io/image/2021-08-01-02.png)
 
  通过对 75 个良性样本和 75 个恶意样本使用上述混淆方式处理后，将原始样本和混淆后的脚本上传至 VirusTotal，实验结果如下图所示，几乎所有混淆方案都可以有效地绕过杀毒软件。
  
- ![VirusTotal 检测结果](https://bushuo.github.io/image/2021-08-01-03.png)
+ ![VirusTotal 检测结果](https://bu-shuo.github.io/image/2021-08-01-03.png)
 
 # 0x03 总体框架
 ---
@@ -73,10 +73,10 @@ PowerShell 是一种具有面向对象的动态类型脚本语言，因为它预
 
 由于在实际攻击中，脚本中可恢复的部分与其他部分之间没有明确界限，特别是当脚本被多层混淆时。所以作者针对该问题设计了一种基于 AST 子树的方法，首先定位可恢复的片段然后再重新构建原始脚本。具体过程如下图所示，可以分为五个阶段：
 
-![去混淆流程](https://bushuo.github.io/image/2021-08-01-05.png)
+![去混淆流程](https://bu-shuo.github.io/image/2021-08-01-05.png)
 
 1. **可疑子树的提取（Extract Suspicious Subtrees）：** 采用了微软的官方库 System.Management.Automation.Language 将 PowerShell 脚本解析为 AST ，因为只有两种方法可以将恢复的部分直接通过管道（pipes）或间接通过变量传递给上面的顶点。如下图所示，一种为红色块所指的 PipelineAst 节点，另一种为蓝色块所指的 AssignmentStatementAst 节点。并以宽度优先的方式遍历 AST，并将可疑的子树推入堆栈中进行后续步骤。
-![两种节点](https://bushuo.github.io/image/2021-08-01-06.png)
+![两种节点](https://bu-shuo.github.io/image/2021-08-01-06.png)
 2. **基于子树的混淆检测（Subtree-based Obfuscation Detection）：** 部署二进制分类器通过脚本片段熵、标记（token）的长度、AST 类型的分布和 AST 的深度四种特征去发现混淆的子树或脚本片段（并不是所有满足模糊特征的树都是可恢复的子树），最终选取了 76 种特征并使用基于梯度下降的 Logistics 回归算法进行分类。
 3. **基于仿真的恢复（Emulation-based Recovery）：** 设置一个 PowerShell 执行会话，并执行在上一步中检测到的混淆部分，若为可恢复子树，则返回恢复后的脚本；若为不可恢复子树，则将其标记为非模糊子树，继续下一个模糊子树。
 4. **抽象语法树的更新（AST Update）：** 将恢复的子树或脚本片段解析为新的 AST 并替换更新 AST，循环这样的过程直到没有混淆的子树。
@@ -91,7 +91,7 @@ PowerShell 是一种具有面向对象的动态类型脚本语言，因为它预
 ### 1. 训练阶段（Training Phase）
 使用解析器解析得到一组对应于每个去混淆脚本的 AST 节点，然后提取它们的值并对其进行规范化：转换为小写字母，再删除无关字符，最后检查别名。采用基于 OOA 挖掘的经典分类方法对命令项集合进行检测，如下图所示，字母表示命令或函数，用红色标记的集合表示从恶意脚本中提取的项目集，再使用 FP-growth 算法生成频度模式，然后选择满足支持度和置信度大于用户指定的最小值规则的模式。最终，作者为 PowerShell 攻击提取了 31 条确定的 OOA 规则。
 
-![提取项目集](https://bushuo.github.io/image/2021-08-01-07.png)
+![提取项目集](https://bu-shuo.github.io/image/2021-08-01-07.png)
 
 ### 2. 检测阶段（Detection Phase）
 使用去混淆的脚本作为项目集，并尝试匹配预先训练的 OOA 规则，结果不仅显示了恶意分数，还显示了脚本的语义。
@@ -105,18 +105,18 @@ PowerShell 是一种具有面向对象的动态类型脚本语言，因为它预
 
 ### 2. 脚本恢复的质量
 
-![脚本恢复的质量](https://bushuo.github.io/image/2021-08-01-09.png)
+![脚本恢复的质量](https://bu-shuo.github.io/image/2021-08-01-09.png)
 
 ### 3. 去混淆的效率
 
-![去混淆的效率](https://bushuo.github.io/image/2021-08-01-10.png)
+![去混淆的效率](https://bu-shuo.github.io/image/2021-08-01-10.png)
 
 ### 4. 去混淆对 AV 检测和语义感知检测结果的影响
 
-![去混淆对 AV 检测和语义感知检测结果的影响](https://bushuo.github.io/image/2021-08-01-11.png)
+![去混淆对 AV 检测和语义感知检测结果的影响](https://bu-shuo.github.io/image/2021-08-01-11.png)
 ### 5. 去混淆方法中单个技术的影响
 
-![去混淆方法中单个技术的影响](https://bushuo.github.io/image/2021-08-01-12.png)
+![去混淆方法中单个技术的影响](https://bu-shuo.github.io/image/2021-08-01-12.png)
 
 # 0x07 现有工作
 ---
@@ -124,7 +124,7 @@ PowerShell 是一种具有面向对象的动态类型脚本语言，因为它预
 ### 1. 基于脚本的恶意软件检测
 如下图所示，对于脚本的恶意软件检测可以分为三类：
 
-![恶意软件检测分类](https://bushuo.github.io/image/2021-08-01-13.png)
+![恶意软件检测分类](https://bu-shuo.github.io/image/2021-08-01-13.png)
 
 ### 2. 去混淆方法
 对于二进制文件的混淆，精确识别混淆是去混淆的第一步，使用基于签名的方法可以在可执行文件种搜索已知的混淆。为了处理未知的混淆方式，最新的研究采用了多特征混淆检测。而对于脚本语言来说，Liu 等人提出了 PSDEM，这是一种主要用于 PowerShell 去混淆的手动方法。Adbelkhalek 提出的 JSDES 是一种混合的方法，用于识别混淆处理的可疑函数，然后对这些函数去混淆。Lu 等人提出的基于语义的方法使用了动态分析和程序切片技术来去混淆，但这种方法的问题是代码覆盖率低。
