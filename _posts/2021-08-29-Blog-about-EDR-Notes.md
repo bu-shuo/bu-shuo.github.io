@@ -1,0 +1,195 @@
+---
+title: 《Endpoint Detection and Response&#58; How Hackers Have Evolved》博客翻译
+description: 这是一篇关于 EDR 的介绍和端点检测躲避技术探究的文章翻译。
+categories: Translation
+published: true
+---
+
+<br/>
+
+**原文链接** ：[Endpoint Detection and Response: How Hackers Have Evolved](https://www.optiv.com/insights/source-zero/blog/endpoint-detection-and-response-how-hackers-have-evolved) - Matthew Eidelberg
+
+# 0x00 简介
+---
+
+一个攻击者主要的目标就是完成特定任务并且不被发现，这个过程包括了在目标环境中建立一个立足点并进行横向移动，在真实攻击过程中，攻击者是在对目标安全控制系统所知甚少的情况下进行的。因此，攻击者必须注意调整他们的战略来保证不被安全控制系统所发现。随着新技术的不断发展，安全控制技术也逐渐成熟，这促使各种类型的攻击者调整和改进他们的策略，以此来最大限度提高攻击成功的可能性。
+
+从攻击者的角度来看，最具挑战的新技术就是端点检测响应系统（Endpoint Detection and Response，EDR），它总是被称为未来的杀毒软件（Antivirus，AV）。传统的 AV 主要通过结合签名和启发式分析技术来加强对恶意代码的检测和防御，然而，EDR 主要有两个任务： **对恶意行为和其他签名的检测** 和 **便捷的分析和应急响应** ，因为这些原因，EDR 已经成为全面防御攻击者的要求。
+
+EDR 被设计用来检测发生在端点上的可疑行为，这些行为可能包括一个攻击范围，例如进程执行或进程注入，以及在内存中加载映像。一旦这些行为被识别，EDR 就该发挥第二个作用——作为防御者和应急响应的工具对检测到的行为进行响应。响应的过程包括将受害主机从网络中隔离，快速收集端点日志，重塑事件发生的时间线，收集和记录威胁指标，甚至会终止可以进程。
+
+攻击者则是通过开发新的更复杂的技术去躲避在磁盘和内存上的检测来作为回应。这些技术不局限于传统的初始攻击向量，它们经常利用后渗透技术去躲避检测，实施这些技术的关键是能够 hook 到主机上的所有进程，因为 EDR 技术会在几毫秒内作出许多决定。
+
+如果没有之前的优秀工作，这个项目是不可能实现的。许多人公开了 EDR 和 内存 Hook 方面的创新研究，这些工作的重点是绕过特定的产品。本文的目的则是更深入地探讨该主题，不是专注于仅用于特定产品的技术，而是识别多有 EDR 产品的系统性问题，以及攻击者如何无需事先了解客户的安全栈就可以利用它们绕过 EDR 产品，这需要涉及到先前讨论过的概念。
+
+如果你对这方面很感兴趣，这里有一些其他的资源：
+* [Bypass EDR’s memory protection, introduction to hooking](https://medium.com/@fsx30/bypass-edrs-memory-protection-introduction-to-hooking-2efb21acffd6) - Hoang Bui
+* [Universal Unhooking: Blinding Security Software](https://blogs.blackberry.com/en/2017/02/universal-unhooking-blinding-security-software) - Jeffrey Tang
+* [Let’s Create An EDR… And Bypass It!](https://ethicalchaos.dev/2020/05/27/lets-create-an-edr-and-bypass-it-part-1/) - CCob
+* [Pushing back on userland hooks with Cobalt Strike](https://blog.cobaltstrike.com/2021/01/13/pushing-back-on-userland-hooks-with-cobalt-strike/) - Raphael Mudge
+
+
+# 0x01 什么是 hooking ？
+---
+
+Hooking 是一项改变程序行为的技术，它允许 EDR 去监控进程的执行流程，收集这些信息用于行为分析和检测可疑或恶意的活动。这使得 EDR 可以更准确地检测初始攻击技术（如代码执行）和后渗透技术（如权限提升、横向移动或勒索软件活动）。
+
+这些 hooks 将数据发送到端点上运行的 EDR 代理，以便实时处理监控的数据。EDR 通常安装在内核级别，需要最高特权访问，这么做的原因主要有两个：第一是避免被攻击者关闭或删除，因为访问内核运行的服务并不容易，想要实施攻击通常需要某种漏洞，或者攻击者已经在端点上取得高级特权。不过由于攻击者通常是“黑盒”攻击，所以假设最初的攻击还没有特权，必须通过后渗透阶段获得，如果不小心执行一些程序，可能就会被 EDR 捕获。第二就是因为在内核中运行可以提供 EDR 访问、控制和监视整个系统。
+
+![Privilege Map](https://bu-shuo.github.io/image/2021-08-29-01.jpg) 
+
+代理经常通过加载他们的 DLL 将 hooks 放入进程中，DLL 会重新映射已经加载过的函数。这使得代理可以监控每个进程，收集监控的数据，通过不断地接受进程、磁盘和网络通信中的变化，代理将数据传递到产品的基于云的平台，在云平台上，所有的数据都将被处理，并且归类为恶意或者良性行为。虽然大部分预防控制是由代理执行，但通过对攻击技术的修改可以绕过代理的初始检测，这就是 EDR 平台在基于大范围收集的数据来识别恶意行为方面真正发挥作用的地方。
+
+![EDR Telemetry Diagram](https://bu-shuo.github.io/image/2021-08-29-02.jpg) 
+
+例如，一个进程产生一个挂起的新进程，并修改新进程的内存权限去执行 WriteProcessMemory 过程，写入的数据是经过加密的，所以不会触发代理的任何恶意指标。然而，发送到 EDR 平台的监控数据仍然可以查看，并且将这些事件识别为 Process Hollowing 技术。所有的过程都在不到一秒的时间发生，为了确保威胁不会成功，这意味着代理需要带两的数据来作出分析决策。
+
+为了进一步了解数据流如何工作，我们需要对 Windows 架构有所了解。首先，Windows 系统提供了大量的函数和 API 调用，应用程序可以利用它们执行代码。Windows API 的主要作用是在调用系统调用执行底层指令前对齐所有堆栈寄存器。
+
+像 NTAllocateVitualMemory 等系统调用提供了一个低级接口，允许进程和操作系统交互。这些接口是过渡到内核的底层汇编指令，用于告诉 CPU 执行诸如分配内存、创建文件或将存储在特定缓冲区的数据写入磁盘等操作。这些系统调用驻留在 ntdll.dll 动态链接库（DLL）中，其中有许多没有记录，因为他们只执行底层汇编指令，系统调用不能被直接调用。
+
+![Execution Flow Example](https://bu-shuo.github.io/image/2021-08-29-03.jpg) 
+
+当一个进程被执行时，系统 DLL 被加载，此时 EDR 代理 hook 特定的 API 函数和系统调用，如 VirtualAlloc 和 NTAllocateVirtualMemory。需要注意的是，每个 EDR 平台 hook 不同的函数和系统调用，提供不同的监控，进而产生不同的信息和不同的检测结果。随着执行流程的进行，EDR 的 hook 被触发，强制执行从系统 DLL 跳转到 EDR DLL，此时 EDR 执行一系列指令，然后返回系统 DLL。
+
+![Execution flow Example – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-04.jpg) 
+
+如下图所示，同一个系统调用被调用两次，这是由于用户模式和内核模式之间的转换。系统调用可能以字符 NT 或 ZW 为前缀，NT 系统调用表示来自用户模式的调用， ZW 系统调用表示来自内核模式的系统调用。无论前缀如何，底层的系统调用指令都是相同的。
+
+![NT and ZW Prefixes](https://bu-shuo.github.io/image/2021-08-29-05.png) 
+
+# 0x02 为什么 EDRs 要 hook 用户模式
+---
+
+尽管内和模式是最高级别的访问类型，但它存在使 EDR 有效性变复杂的缺点。在内核模式下，可见性可能非常有限，因为有些数据只能在用户模式下可用，另外，第三方的内核驱动程序很难开发，如果没有经过适当的审查，系统不稳定的可能性会很大。内核通常被认为是系统中最脆弱的部分，内核态代码的任何错误都可能导致巨大的问题，甚至使系统完全崩溃。
+
+对于攻击者来说，用户模式更有吸引力，因为它无法直接访问底层硬件，在用户模式下运行的代码必须使用与硬件交互的 API 函数，从而提高稳定性并减少系统范围的崩溃（因为程序崩溃不会影响系统运行）。因此，在用户模式下运行的应用程序需要最少的权限和更加稳定的运行，可以说，很多 EDR 严重以来用户态的 hook，而不是内核态的。
+
+由于 hook 存在于用户模式并 hook 到我们的进程中，因此我们也可以控制它们。由于应用程序在用户态的上下文中运行，这意味着加载到进程中的所有内容都可以由用户以某种形式进行操作，需要注意的是，内存的一些敏感区域被设置为 Execute，Read（ER-）可以防止对这些区域进行修改，我们将在下面讨论一些技术解决这个问题。
+
+# 0x03 在内存中绕过 EDRs
+---
+
+在我们找到内存 hook 之前，我们需要识别 EDR 的 DLL，这是缩小搜索范围的冠军爱你，因为一个简单的应用程序也可以加载许多不同的 DLL，并且它们可以根据进程需要的功能进行更改，例如，任何 Windows 的套接字连接都需要 ws2_32.dll。
+
+识别 EDR 的 DLL 就像查看 DLL 的名称或描述一样简单，其他技术可能涉及查找 DLL 的路径或查看 DLL 的代码签名正虚。有几个不错的工具可以做到这一点，在我们的例子中使用了 ProcessHacker2 —— 一个免费的进程监控软件，如下图所示，chrome 加载了多个 DLL，但其中一个在名称和描述上都很突出，因为名称包含了 EDR 产品的名称，而描述则写明了其用途。
+
+![Execution flow of a Procedure – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-06.png) 
+
+现在我们已经确定了 EDR 的 DLL，下一步就是搜索这些 hooks，为此我们需要更深入地了解这些系统级函数以及它们如何在堆栈上运行。如果我们使用开源调试器 x64dbg 看一下，我们可以看到每个 DLL 都有一系列导出函数，这些都是应用程序可利用的功能。
+
+![Sample Export Functions of Ntdll](https://bu-shuo.github.io/image/2021-08-29-07.png)
+
+我们指导系统调用是应用程序访问内核执行低级指令的唯一途径，让我们在汇编层面来看看这些指令如何执行。在 x64 体系结构中，每个系统调用都应以当前存储在 RCX 中的值移入 R10 开始，然后是向 EAX 寄存器移入十六进制值。这个十六进制值是一个系统服务号，对于每个系统调用都是唯一的，内核不知道实际执行的是什么指令，只是查找唯一的系统调用 ID 来确定要执行的指令。在此例中，您可以看到典型的系统调用的汇编形式。SYSCALL_ID 对于不同的系统调用是唯一的。
+
+```
+mov r10, rcx
+mov eax, (SYSCALL_ID)
+test byte ptr ds:[7FFE0308], 1
+jne ntdll (ADDRESS)
+syscall
+ret
+int 2E
+ret
+```
+
+有了上面这些信息，我们现在知道 EDR 的 DLL 名称以及这些系统调用应该是什么样子，所以就可以去寻找这些函数间的差异。同时我们还知道 EDR 通过修改前五个字节，使用跳转指令来重定向执行流程（如 jmp 指令，十六进制为“E9”），我们可以通过在 ntdll 中搜索任何匹配 E9 的模式来搜索潜在的 hooks，这些 hooks 会跳转到 EDR 的 DLL 去。
+
+![Execution flow of a Procedure – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-08.png)
+
+如下图所示，我们可以清楚的看到被 hook 的系统调用：
+
+![Execution flow of a Procedure – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-09.png)
+
+不过并不是所有 EDR 都是这样，因为某些产品试图通过在跳转到 EDR 本身之前，首先跳转到同一系统 DLL 中的其他区域或当前进程中的线程来掩盖向 EDR 的跳转。在许多情况下，结果是相同的，我们仍可以通过查看系统调用对程序集的任何修改来识别这些指令。
+
+![EDR Indirect Jumps](https://bu-shuo.github.io/image/2021-08-29-10.png)
+
+通过了解 hook 相关知识，我们可以通过修改正确的字节，覆盖 EDR 的 Hook，这样可以阻止监控数据从进程流向代理，因为 EDR 的 DLL 没有数据要发送。
+
+这种方法听起来不错，然而有几个因素可能会使真正执行的时候变得困难。第一个主要的问题：在此过程完成前，EDR 很有可能检测到覆盖所有 hook 的操作；另一个主要的问题是需要准确了解每个 EDR hook 的功能。不同的产品会 hook 不同的 syscall，攻击者永远不知道目标主机在使用什么产品（取决于他们的 OSINT）。另外，如果要考虑为每个 Windows hook 的函数做覆盖，攻击载荷的大小也会因此增大，同时还需要额外的研究来确定在没有检测到 EDR 的情况下进行哪些针对性的修改。
+
+一种更简单的方法就是重新加载进程的区段来刷新 EDR，因为我们知道 EDR 的 hook 在进程产生时加载的，我们还知道 EDR 通常会 hook 哪些 DLL，所以我们可以通过使用 API 函数 VirtualProtect 来定位这些 DLL，并在内存中将这些 DLL 的权限进行修改，包括读取、写入和执行。
+
+我们首先打开位于磁盘上的系统 DLL，这些文件位于 C:\Windows\System32\ 或者 SysWow(32位)。这些存储在磁盘上的 DLL 是还没被 hook的，因为 EDR 仅 hook 加载到内存中的内容，一旦 DLL 在内存中打开，我们就可以获取 DLL 的 .text 段的字节，DLL 的这一区段包含可执行的程序集 —— NTDLL下包含了有系统调用的可执行代码。
+
+![Execution flow of a Procedure – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-11.png)
+
+尽管在磁盘中找到了未被 hook 的 DLL 副本，但我们仍需要确保将字节写入进程内存中的正确位置，这是因为地址空间布局随机化（ASLR）造成的问题，该机制保证库在堆和栈上的位置随机定位。由于进程已经存在于内存中，如果我们没有将正确的字节写到正确的内存位置，当应用程序执行时就会崩溃。我们可以依赖存储在 .text 中的每个函数的偏移，而不是尝试重新映射或修改执行流程，每个函数都有一个偏移量，它表示从它们所在基地址开始的确切字节数，提供函数在堆栈中的位置。
+
+![Execution flow of a Procedure – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-12.png)
+
+使用 VirtualProtect，我们可以将 ntdll 的 .text 区域的权限更改为可写。虽然这是一个系统 DLL，但由于它已加载到进程中（由我们控制），因此我们可以无需提权就可以更改内存权限，同样需要注意的是我们只是修改了 DLL 的一部分来避免检测，一旦完成权限修改，我们就可以根据正确的偏移量写入字节，并将正确的、未被 hook 的字节恢复到正确的内存地址。
+
+![Execution Flow of a Procedure – EDR Hooked](https://bu-shuo.github.io/image/2021-08-29-13.jpg)
+
+系统调用已经恢复到安装 EDR 的 hook 之前的值，而 EDR 的 DLL 仍然从在，但是不会从 hook 那里接收到任何监控数据，因为它们已经不存在了，EDR 也不知道 hook 已经不存在，因为通常没有执行完整性检查来确保它们仍然处于活动状态。
+
+![Before Reloading Occurs – Hooks Still in place](https://bu-shuo.github.io/image/2021-08-29-14.png)
+
+![After Reloading– Hooks are Gone](https://bu-shuo.github.io/image/2021-08-29-15.png)
+
+这种去除 hook 的方式非常有效，但是更改内存区域的权限却可能被检测到，例如识别对 VirtualProtect 函数的调用。当 hook 被去除时，监控可以指示这些攻击的存在。这可以使用其他技术覆盖内存来克服，通过绕过调用 Windows API 函数来覆盖内存，而是使用低级操作系统原语，我们可以在不修改执行、读取（ER-）权限的情况下覆盖和恢复系统函数的汇编。
+
+另一种技术则是使用我们自己的汇编系统调用，而不是依赖操作系统。这是躲避 EDR hook 的有效办法，因为 EDR 只 hook 它知道的内容，这种情况下，它只知道系统 DLL 中存在的内容，这意味着我们可以通过创建自己的函数调用来避免检测到应用程序的内存部分。因此，我们需要包含设置的汇编代码，使用正确的变量和寄存器来执行我们的系统调用，这些汇编指令将包含在一个独立的反汇编文件中，该文件将在编译有效负载时加载到我们的代码中。但是需要使这些系统调用值是动态的，因为特定的系统调用 ID 会根据 Windows 体系结构而变化，不同版本的 Windows 具有不同的系统调用，具体取决于操作系统，例如：
+
+![Syscall](https://bu-shuo.github.io/image/2021-08-29-16.jpg)
+
+如果你很好奇，在开发你自己的系统调用时，一个很好的参考是 j00ru 的 Windows-Syscall，大多数情况下，代码如下所示：
+
+![Examples of Custom Syscalls and Assembly](https://bu-shuo.github.io/image/2021-08-29-17.jpg)
+
+我们需要包含的下一段代码是我们自己版本的 WinAPI 函数，用于在我们的系统调用执行前将寄存器与正确的值对齐，这是由于系统调用的底层特性。这些程序通常存储在 kernelbase.dll 和 kernel32.dll 中，让我们继续以 NTAllocateVirutalMemory 为例。
+
+```
+kernel_entry NTSYSCALLAPI NTSTATUS NtAllocateVirtualMemory(
+	HANDLE ProcessHandle,
+	PVOID *BaseAddress,
+	ULONG_PTR ZeroBits,
+	PSZIE_T RegionSize,
+	ULONG AllocationType,
+	ULONG Protect
+);
+```
+
+在系统调用执行前，这些值都需要以特定的顺序存储在堆栈上的寄存器中，当应用程序调用 VirtualAlloc 函数时，只需要四个属性：地址、大小、类型和保护。
+
+```
+LPVOID VirtualAlloc(
+	LPVOID lpAddress,
+	SIZE_T dwSize,
+	DWORD flAllocationType,
+	DWORD flProtect
+);
+```
+
+这些值始终是动态的，只有唯一标识 VirtualAlloc 函数的句柄才是静态的，对于不同的 EDR 来说，读取每一个字节串来确定系统 DLL 之外的 API 或系统调用是非常困难的。
+
+![Examples of Syscall Custom Assembly](https://bu-shuo.github.io/image/2021-08-29-18.png)
+
+![Custom Assembly Location in Memory](https://bu-shuo.github.io/image/2021-08-29-19.png)
+
+虽然这种方法听起来很容易开发，但有许多小的依赖项，如果没有正确开发，可能会导致一些问题或系统崩溃。之前我们介绍了正常请求的执行流程以及 WinAPI 和系统调用如何与内核交互。在开发你自己的系统调用和函数时，还需要为所有可能的响应代码和与这些值相关的十六进制提供参考，当指令返回时，我们的代码需要知道如何解释响应；显然这些响应不会是“ALL GOOD”或“this value you caused an error”，这些通常是系统解释为错误代码的十六进制。
+
+![Error Code Example](https://bu-shuo.github.io/image/2021-08-29-20.png)
+
+虽然我们强调了攻击者可以用来规避 EDR 产品的防御和检测功能的一些技术，但这并不意味着这些产品就没用了。EDR 仍然是对检测和预防网络威胁很重要的产品，这篇博客的重点不应该是用其他东西替换这些产品，相反，应该更加关注如何改进这些产品，因为它们不会很快被替代。
+
+# 0x04 还能做些什么？
+---
+
+虽然我们只讨论了几种有效的技术，但还有许多不同的方法可以实现相同的目标，对于依赖 EDR 产品来检测和预防现实网络威胁的组织来说，这似乎令人担心。
+
+残酷的是还没有简单有效的解决方案，大部分补救措施是对这些产品的更新和改进。第一个就是实现防篡改的监控器，它监控应用程序行为，寻找进程内存变化的特定特征，尤其是关注加载的 DLL，进程需要修改系统 DLL 的情况很少，因为它们仅用于和操作系统交互。本质上，这些监控器将通过在创建初始进程并加载 DLL 后监视对系统 DLL 字节和权限的任何修改来工作。
+
+另一个更广泛的途径是摆脱依赖 hook 用户模式的模式，转而更多地存在于内核中。这种方法有很多好处，因为内核是操作系统要加载的一部分，因此它可以监控任何修改用户模式 hook 的操作。大多数现代 EDR 产品已经在内核中具有某种功能，无论是用于网络连接还是文件系统监控，扩展这些组件不仅可以提供额外的监控，还有助于防止攻击者进行任意的篡改，因为内核模式的资源需要特权访问。此外，诸如 PatchGuard 之类的机制可以防止对内核中运行的资源进行任何修改，正如之前提到的，开发一个在内核空间运行稳定的产品需要付出比在用户模式下更多的努力。 
+
+攻击者可以清除事件日志或欺骗命令来混淆监控数据，从而使 EDR 更难获得正确信息， Windows 事件跟踪（ETW）使得这些攻击非常困难。ETW 提供了一种从用户和内核模式跟踪和记录事件的方法，这些数据是及其精细的，虽然 ETW 主要在内核中运行，但它依赖于存储在 ntdll 中的系统调用来提供监控，这些系统调用向 ETW 传递监控数据。ETW 的独特之处在于它不依赖于 hook，因为这些 hook 都是 Windows 原生的，主要目的是将数据输入内核，这意味着永远不需要修改或 hook 这些系统调用。相反，ETW 确定哪些数据是相关的，哪些不是，通过使用 ETW，EDR 可以做出与基于用户模式 hook 的相同决定。
+
+虽然已经有公开披露如何规避 ETW 的技术，但事实上这些类型的攻击需要权限提升。这使得在现实世界中执行这些技术还是存在难度的，因为攻击者的初始受害点没有特殊权限，并且通常是需要进行后渗透攻击，从主机捕获 ETW 监控的数据可为蓝队提供大量信息，以对检测进行分类并了解威胁带来的风险，它还可以帮助事件响应人员了解攻击发生的方式和时间，从而为响应流程提供信息。
+
+使用 EDR 很棒，但将它们作为针对网络攻击的单一检测来源可能会失败，此外，采用一套与 EDR 互补的综合安全控制措施可以有效地填补这些空白，以帮助预防和检测网络攻击。这包括确保从所有端点收集事件日志，而不仅仅是关键系统或服务器，因此防御者能够将攻击的活动关联起来，这些事件可能无法清楚地表明 EDR 绕过攻击，但可以提供检测和预防攻击所需的有用组件。
+
+此外，基于网络的控制在检测恶意活动方面同样重要，执行深度数据包检测和 TLS 拦截的网络控制可以有效检测网络上的恶意活动，即使攻击者能够绕过安全控制并篡改日志记录事件，网络控制也可以测出可能导致检测 C2 通道的出站连接。最后，应用程序白名单或其他限制应用程序执行的方法可能会阻碍攻击者绕过 EDR 的能力。
+
+虽然这些都是帮助提高检测和预防能力的方法，但事实上这仍是一场猫鼠游戏，攻击者总是会开发新技术来逃避检测，而防御者则必须适应克服它们，EDR 产品也不能免于这种不断的动态变化。
