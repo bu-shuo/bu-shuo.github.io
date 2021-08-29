@@ -1,7 +1,7 @@
 ---
-title: 《Endpoint Detection and Response&#58; How Hackers Have Evolved》博客翻译
+title: 《Endpoint Detection and Response&#58; How Hackers Have Evolved》 博客翻译
 description: 这是一篇关于 EDR 的介绍和端点检测躲避技术探究的文章翻译。
-categories: Translation
+categories: Translations
 published: true
 ---
 
